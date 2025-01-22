@@ -26,6 +26,17 @@ class Employee(models.Model):
         ('Chudi Section', 'Chudi Section'),
         ('Kids Section', 'Kids Section'),
         ('Towel Section', 'Towel Section'),
+        ('Cashier', 'Cashier'),
+        ('Delivery', 'Delivery'),
+        ('Parking', 'Parking'),
+        ('Tailor', 'Tailor'),
+        ('Dhoti', 'Dhoti'),
+        ('Gown', 'Gown'),
+        ('Frock', 'Frock'),
+        ('Uniform', 'Uniform'),
+        ('Men’s Hosiery', 'Men’s Hosiery'),
+        ('Gate', 'Gate'),
+        ('Dress Material', 'Dress Material'),
     ]
     
     first_name = models.CharField(max_length=100)
