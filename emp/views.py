@@ -245,7 +245,7 @@ def scan_view(request):
     if request.method == 'POST':
         employee_id = request.POST.get('employee_id')
         if employee_id:
-            eid=employee_id[4:]
+            eid=employee_id[3:]
             try:
                 employee = get_object_or_404(Employee, id=eid)
             except:
