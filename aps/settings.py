@@ -29,9 +29,18 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'emp',
+    # 'debug_toolbar',
 ]
 
+# INTERNAL_IPS = [
+#     '127.0.0.1', '192.168.1.28' # Loopback IP for local testing
+# ]
+
+
+
+
 MIDDLEWARE = [
+    # 'debug_toolbar.middleware.DebugToolbarMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

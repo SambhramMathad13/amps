@@ -13,6 +13,7 @@ SPECIAL_PASSWORD = "admin"
 from django.core.paginator import Paginator
 from django.http import HttpResponse
 import csv
+from django.core.cache import cache
 
 
 
@@ -103,20 +104,40 @@ def dashboard(request):
 
     # Get today's date
     today = date.today()
-    
+
+    # Define a unique cache key for today's attendance data
+    cache_key = "dashboard_attendance"
+
+    # Attempt to get cached data
+    cached_data = cache.get(cache_key)
+
+    if cached_data:
+        # Extract cached values
+        attendance = cached_data['attendance']
+        total_employees = cached_data['total_employees']
+        employees_in_office = cached_data['employees_in_office']
+    else:
+        # Base attendance queryset for today's records
+        attendance = Attendance.objects.filter(
+            Q(morning_check_in_time__isnull=False) |
+            Q(lunch_check_in_time__isnull=False),
+            date=today
+        ).select_related('employee').order_by('employee__id')
+        # Count total employees and employees in office
+        total_employees = Employee.objects.count()
+        employees_in_office = attendance.count()
+
+        # Cache the data for future use
+        cache.set(cache_key, {
+            'attendance': attendance,
+            'total_employees': total_employees,
+            'employees_in_office': employees_in_office,
+        }, timeout=900)  # Cache for 1 hour (3600 seconds)
+
     # Get the search query from the request
     search_query = request.GET.get("search", "").strip()
 
-    # Base attendance queryset for today's records
-    attendance = Attendance.objects.filter(
-        Q(morning_check_in_time__isnull=False) |
-        Q(lunch_check_in_time__isnull=False),
-        date=today
-    ).select_related('employee').order_by('employee__id')
-    total_employees = Employee.objects.count()
-    employees_in_office=attendance.count()
     # Filter attendance records based on the search query
-
     if search_query:
         attendance = attendance.filter(
             Q(employee__first_name__icontains=search_query) |
@@ -128,8 +149,12 @@ def dashboard(request):
     paginator = Paginator(attendance, 10)  # Show 10 records per page
     attendance_records = paginator.get_page(page_number)
 
-    return render(request, "dashboard.html", {"attendance_records": attendance_records, "search_query": search_query,            "total_employees": total_employees,
-            "employees_in_office": employees_in_office,})
+    return render(request, "dashboard.html", {
+        "attendance_records": attendance_records,
+        "search_query": search_query,
+        "total_employees": total_employees,
+        "employees_in_office": employees_in_office,
+    })
 
 
 def all_employees(request):
@@ -140,11 +165,16 @@ def all_employees(request):
     search_query = request.GET.get('search', '').strip()
     page_number = request.GET.get('page', 1)
 
-    # Base queryset for employees
-    employees = Employee.objects.all().order_by('id')
+    # Check if employees are cached
+    employees = cache.get('all_employees')
 
-    # Filter employees based on search query
+    if employees is None:
+        # Fetch from the database and cache it
+        employees = Employee.objects.all().order_by('id')
+        cache.set('all_employees', employees,60*30)
+
     if search_query:
+        # Filter employees based on search query
         employees = employees.filter(
             Q(first_name__icontains=search_query) |
             Q(id__icontains=search_query)
@@ -159,7 +189,6 @@ def all_employees(request):
         'page_obj': page_obj,
         'search_query': search_query
     })
-
 
 
 # Employee Management Views
@@ -184,8 +213,10 @@ def add_employee(request):
                 mobile=mobile,
                 base_salary=base_salary,
             )
+            # Clear the cache for all employees
+            cache.delete("all_employees")
             messages.success(request, "Employee added successfully.")
-            return redirect("dashboard")
+            return redirect("all_employees")
 
         return render(request, "add_employee.html")
     else:
@@ -214,7 +245,8 @@ def edit_employee(request, employee_id):
             employee.mobile = request.POST.get("mobile", employee.mobile)
             employee.base_salary = request.POST.get("base_salary", employee.base_salary)
             employee.save()
-
+            # Clear the cache for all employees
+            cache.delete("all_employees")
             messages.success(request, "Employee details updated successfully.")
             return redirect("all_employees")
         else:
@@ -231,6 +263,8 @@ def delete_employee(request, employee_id):
             if special_password == SPECIAL_PASSWORD:
                 employee = get_object_or_404(Employee, id=employee_id)
                 employee.delete()
+                # Clear the cache for all employees
+                cache.delete("all_employees")
                 messages.success(request, "Employee deleted successfully.")
             else:
                 messages.error(request, "Incorrect password. Employee not deleted.")

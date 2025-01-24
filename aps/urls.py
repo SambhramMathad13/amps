@@ -22,3 +22,12 @@ urlpatterns = [
     path('', include('emp.urls')),  # Replace 'your_app_name' with your app's name
 ]
 #
+
+# from django.conf import settings
+# from django.conf.urls import include
+
+# if settings.DEBUG:  # Enable only in DEBUG mode
+#     urlpatterns += [
+#         path('__debug__/', include('debug_toolbar.urls')),
+#     ]
+
