@@ -294,6 +294,8 @@ def scan_view(request):
             current_time_only = current_time.time()
             # print(current_time_only)
 
+            #clear cache
+            cache.delete("dashboard_attendance")
 
             # Morning Check-in
             if time_in_range(time(6, 0), time(10, 59), current_time_only):
@@ -337,7 +339,7 @@ def scan_view(request):
                     messages.error(request, f"Lunch check-in and check-out already recorded for {employee.first_name}.")
 
             # Evening Check-out
-            elif time_in_range(time(18, 1), time(22, 0), current_time_only):
+            elif time_in_range(time(18, 1), time(23, 55), current_time_only):
                 if attendance.morning_check_in_time and not attendance.morning_check_out_time:
                     attendance.morning_check_out_time = current_time
                     attendance.save()
