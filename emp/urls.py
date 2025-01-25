@@ -23,12 +23,9 @@ urlpatterns = [
     path('scan/', views.scan_view, name='scan'),
     path('view/<int:employee_id>/', views.view_employee_attendance, name='view_employee_attendance'),
 
-    # Salary
-    path('calculate/<int:employee_id>/', views.calculate_salary, name='calculate_salary'),
-
     # Advance Payment
     path('payment/<int:employee_id>/', views.advance_payment, name='advance_payment'),
-    path('update-advance/', views.update_advance, name='update_advance'),
+    path('merge-advances/<int:employee_id>/', views.merge_advances, name='merge_advances'),
 
 
     # Download

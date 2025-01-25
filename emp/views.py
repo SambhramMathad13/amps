@@ -1,7 +1,5 @@
 from datetime import datetime, time, timedelta
-import json
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import JsonResponse
 from django.db.models import Sum
 from .models import Employee, Attendance, AdvancePayment
 from django.contrib.auth import login, logout, authenticate
@@ -359,151 +357,111 @@ def scan_view(request):
     return render(request, 'scan.html')
 
 
+
 # Attendance Viewing View
 def view_employee_attendance(request, employee_id):
     if request.user.is_authenticated and request.user.is_superuser:
+        # Fetch the employee
         employee = get_object_or_404(Employee, id=employee_id)
-        advances = AdvancePayment.objects.filter(
-            employee=employee,
-            is_paid=False
-        )
-        return render(request, 'view_employee_attendance.html', {'employee': employee, 'advances': advances})
+
+        # Get all advances for the employee, ordered by date descending
+        advances = AdvancePayment.objects.filter(employee=employee).order_by('-date')
+
+        # Calculate total amounts for 'taken' and 'paid'
+        total_taken = advances.filter(type='taken').aggregate(total=Sum('amount'))['total'] or 0
+        total_paid = advances.filter(type='paid').aggregate(total=Sum('amount'))['total'] or 0
+
+        # Calculate net
+        net = total_taken - total_paid
+
+        # Check if advances exceed 10
+        merge = advances.count() > 10
+
+        # Pass data to the template
+        return render(request, 'view_employee_attendance.html', {
+            'employee': employee,
+            'advances': advances,
+            'net': net,  # Send net to the template
+            'merge': merge,  # Merge flag
+        })
     else:
         return redirect("admin_login")
 
 
-def calculate_salary(request, employee_id):
+def merge_advances(request, employee_id):
     if request.user.is_authenticated and request.user.is_superuser:
         if request.method == "POST":
-            # Parse data from the request
-            data = json.loads(request.body)
-            start_date = data.get('start_date')
-            end_date = data.get('end_date')
-
-            # Ensure both dates are provided
-            if not start_date or not end_date:
-                return JsonResponse({'error': 'Start and End dates are required.'}, status=400)
-
-            # Convert strings to date objects
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-
-            # Get the employee instance
+            # Fetch the employee
             employee = get_object_or_404(Employee, id=employee_id)
 
-            # Filter attendance records within the date range
-            attendance_records = Attendance.objects.filter(
-                employee=employee,
-                date__range=(start_date, end_date)
-            ).order_by('-date')
+            # Get the net amount from the POST data
+            net_amount = float(request.POST.get("net", 0))
 
-            # Calculate valid workdays
-            valid_workdays = attendance_records.filter(
-                morning_check_in_time__isnull=False,
-                morning_check_out_time__isnull=False
-            ).count()
+            # Determine the type based on net_amount
+            net_type = 'taken' if net_amount > 0 else 'paid'
 
-            # Filter advance payments
-            advances = AdvancePayment.objects.filter(
+            # Get all the advances to merge
+            advances_to_merge = AdvancePayment.objects.filter(employee=employee)
+
+            # Delete the old advances
+            advances_to_merge.delete()
+
+            current_time = datetime.now()
+
+            # Create a new compressed advance entry
+            AdvancePayment.objects.create(
                 employee=employee,
-                date__range=(start_date, end_date),
-                is_paid=False
+                amount=abs(net_amount),
+                date=current_time.date(),
+                type=net_type
             )
-            total_advance = advances.aggregate(Sum('amount'))['amount__sum'] or 0
 
-            # Calculate the total salary
-            total_salary = (valid_workdays * (employee.base_salary // 30)) - total_advance
 
-            # Return attendance records, advance details, and salary
-            return JsonResponse({
-                'employee': f'{employee.first_name} {employee.last_name}',
-                'attendance_records': [
-                    {
-                        'date': record.date.strftime('%Y-%m-%d'),
-                        'morning_check_in': record.morning_check_in_time.strftime('%H:%M:%S') if record.morning_check_in_time else "Not Checked In",
-                        'lunch_check_in': record.lunch_check_in_time.strftime('%H:%M:%S') if record.lunch_check_in_time else "Not Checked In",
-                        'lunch_check_out': record.lunch_check_out_time.strftime('%H:%M:%S') if record.lunch_check_out_time else "Not Checked Out",
-                        'evening_check_out': record.morning_check_out_time.strftime('%H:%M:%S') if record.morning_check_out_time else "Not Checked Out",
-                    }
-                    for record in attendance_records
-                ],
-                'valid_workdays': valid_workdays,
-                'total_salary': total_salary,
-                'advance_paid': total_advance,
-            })
-        else:
-            return JsonResponse({'error': 'Invalid request method.'}, status=405)
+            messages.success(request, "Advances successfully merged.")
+            return redirect('view_employee_attendance', employee_id=employee.id)
     else:
-        return redirect("admin_login")    
+        return redirect("admin_login")
+
 
 
 # Advance Payment View
 def advance_payment(request, employee_id):
-    # Check if the user is authenticated
+    # Check if the user is authenticated and has superuser privileges
     if request.user.is_authenticated and request.user.is_superuser:
-
-    # Handle POST request
         if request.method == "POST":
+            # Extract form data
+            amount = request.POST.get('amount', 0)
+            password = request.POST.get('password', '')
+            advance_type = request.POST.get('type', 'taken')
+
+            # Check if the provided password matches the special password
+            special_password = getattr(settings, 'SPECIAL_PASSWORD', None)
+            if not special_password or password != special_password:
+                messages.error(request, 'Invalid password...')
+                return redirect('view_employee_attendance', employee_id=employee_id)
+
+            # Validate the amount
             try:
-                data = json.loads(request.body)
-                amount = data.get('amount', 0)
-                password = data.get('password', '')
+                amount = float(amount)
+                if amount <= 0:
+                    messages.error(request, 'Invalid amount. Please enter a positive number.')
+                    return redirect('view_employee_attendance', employee_id=employee_id)
+            except ValueError:
+                messages.error(request, 'Invalid amount format. Please enter a valid number.')
+                return redirect('view_employee_attendance', employee_id=employee_id)
 
-                # Check if the provided password matches the special password
-                special_password = getattr(settings, 'SPECIAL_PASSWORD', None)
-                if not special_password or password != special_password:
-                    return JsonResponse({'error': 'Invalid password'}, status=403)
+            # Create the advance payment record
+            employee = get_object_or_404(Employee, id=employee_id)
+            AdvancePayment.objects.create(employee=employee, amount=amount, type=advance_type)
 
-                # Validate the amount
-                if int(amount) > 0:
-                    employee = get_object_or_404(Employee, id=employee_id)
-                    AdvancePayment.objects.create(employee=employee, amount=amount)
-                    return JsonResponse({'message': 'Advance payment recorded successfully.'})
-                else:
-                    return JsonResponse({'error': 'Invalid amount'}, status=400)
-            except (ValueError, KeyError, json.JSONDecodeError):
-                return JsonResponse({'error': 'Invalid request data'}, status=400)
+            # Success message
+            messages.success(request, 'Advance payment recorded successfully.')
+            return redirect('view_employee_attendance', employee_id=employee_id)
 
-        # If the request method is not POST, return a 405 error
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-    else:
-        return redirect("admin_login")
+        # If the request method is not POST, redirect back with an error message
+        messages.error(request, 'Invalid request method.')
+        return redirect('view_employee_attendance', employee_id=employee_id)
 
-
-def update_advance(request):
-    if request.user.is_authenticated and request.user.is_superuser:
-        if request.method == 'POST':
-            try:
-                # Parse the JSON data from the request
-                data = json.loads(request.body)
-                advance_id = data.get('advanceId')
-                new_amount = data.get('newAmount')
-                new_date = data.get('newDate')
-                mark_paid = data.get('markPaid')
-                special_password = data.get('specialPassword')
-
-                # Validate the special password
-                specialpassword = getattr(settings, 'SPECIAL_PASSWORD', None)
-                if not specialpassword or special_password != specialpassword:
-                    return JsonResponse({'error': 'Invalid password'}, status=403)
-
-                try:
-                    advance = AdvancePayment.objects.get(id=advance_id)
-                except AdvancePayment.DoesNotExist:
-                    return JsonResponse({'success': False, 'message': 'Advance not found.'}, status=404)
-
-                # Update the advance record
-                advance.amount = new_amount
-                advance.date = new_date
-                advance.is_paid = mark_paid
-                advance.save()
-
-                return JsonResponse({'success': True, 'message': 'Advance updated successfully.'})
-            except json.JSONDecodeError:
-                return JsonResponse({'success': False, 'message': 'Invalid JSON data.'}, status=400)
-            except Exception as e:
-                return JsonResponse({'success': False, 'message': f'An error occurred: {str(e)}'}, status=500)
-        else:
-            return JsonResponse({'success': False, 'message': 'Invalid request method.'}, status=405)
-    else:
-        return redirect("admin_login")
+    # Redirect to admin login if the user is not authenticated
+    messages.error(request, 'You must be logged in as an admin to perform this action.')
+    return redirect("admin_login")
